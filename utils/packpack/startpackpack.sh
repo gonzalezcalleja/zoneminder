@@ -1,4 +1,7 @@
 #!/bin/bash
+
+set -o pipefail
+
 # packpack setup file for the ZoneMinder project
 # Written by Andrew Bauer
 
@@ -91,12 +94,12 @@ commonprep () {
 
     # The rpm specfile requires we download each submodule as a tarball then manually move it into place
     # Might as well do this for Debian as well, rather than git submodule init
-    CRUDVER="3.1.0-zm"
+    CRUDVER="3.2.0"
     if [ -e "build/crud-${CRUDVER}.tar.gz" ]; then
         echo "Found existing Crud ${CRUDVER} tarball..."
     else
         echo "Retrieving Crud ${CRUDVER} submodule..."
-        curl -L https://github.com/ZoneMinder/crud/archive/v${CRUDVER}.tar.gz > build/crud-${CRUDVER}.tar.gz
+        curl -L https://github.com/FriendsOfCake/crud/archive/v${CRUDVER}.tar.gz > build/crud-${CRUDVER}.tar.gz
         if [ $? -ne 0 ]; then
             echo "ERROR: Crud tarball retreival failed..."
             exit 1
@@ -111,6 +114,18 @@ commonprep () {
         curl -L https://github.com/ZoneMinder/CakePHP-Enum-Behavior/archive/${CEBVER}.tar.gz > build/cakephp-enum-behavior-${CEBVER}.tar.gz
         if [ $? -ne 0 ]; then
             echo "ERROR: CakePHP-Enum-Behavior tarball retreival failed..."
+            exit 1
+        fi
+    fi
+
+    RTSPVER="cd7fd49becad6010a1b8466bfebbd93999a39878"
+    if [ -e "build/RtspServer-${RTSPVER}.tar.gz" ]; then
+        echo "Found existing RtspServer ${RTSPVER} tarball..."
+    else
+        echo "Retrieving RTSP ${RTSPVER} submodule..."
+        curl -L https://github.com/ZoneMinder/RtspServer/archive/${RTSPVER}.tar.gz > build/RtspServer-${RTSPVER}.tar.gz
+        if [ $? -ne 0 ]; then
+            echo "ERROR: RtspServer tarball retreival failed..."
             exit 1
         fi
     fi
@@ -134,10 +149,18 @@ movecrud () {
         rmdir web/api/app/Plugin/CakePHP-Enum-Behavior
         mv -f CakePHP-Enum-Behavior-${CEBVER} web/api/app/Plugin/CakePHP-Enum-Behavior
     fi
+    if [ -e "dep/RtspServer/CMakeLists.txt" ]; then
+        echo "RtspServer already installed..."
+    else
+        echo "Unpacking RtspServer..."
+        tar -xzf build/RtspServer-${RTSPVER}.tar.gz
+        rmdir dep/RtspServer
+        mv -f RtspServer-${RTSPVER} dep/RtspServer
+    fi
 }
 
 # previsouly part of installzm.sh
-# install the xenial deb and test zoneminder
+# install the deb and test zoneminder
 install_deb () {
 
     # Check we've got gdebi installed
@@ -150,7 +173,7 @@ install_deb () {
       exit 1
     fi
 
-    # Install and test the zoneminder package (only) for Ubuntu Xenial
+    # Install and test the zoneminder package
     pkgname="build/zoneminder_${VERSION}-${RELEASE}_amd64.deb"
 
     if [ -e $pkgname ]; then
@@ -197,7 +220,9 @@ setdebpkgname () {
 
     # Set VERSION to {zm version}~{today's date}.{number of commits} e.g. 1.31.0~20170605.82
     # Set RELEASE to the packpack DIST variable e.g. Trusty
-    export VERSION="${versionfile}~${thedate}.${numcommits}"
+    if [ "" == "$VERSION" ]; then
+      export VERSION="${versionfile}~${thedate}.${numcommits}"
+    fi
     export RELEASE="${DIST}"
 
     checkvars
@@ -249,6 +274,13 @@ execpackpack () {
         fi
     else
         packpack/packpack $parms
+    fi
+
+    if [ $? -ne 0 ]; then
+      echo
+      echo "ERROR: An error occurred while executing packpack."
+      echo
+      exit 1
     fi
 }
 
@@ -337,12 +369,10 @@ elif [ "${OS}" == "debian" ] || [ "${OS}" == "ubuntu" ] || [ "${OS}" == "raspbia
   setdebpkgname
   movecrud
 
-  if [ "${DIST}" == "trusty" ] || [ "${DIST}" == "precise" ]; then
-    ln -sfT distros/ubuntu1204 debian
-  elif [ "${DIST}" == "wheezy" ]; then
-    ln -sfT distros/debian debian
-  else
-    ln -sfT distros/ubuntu1604 debian
+  if [ "${DIST}" == "focal" ] || [ "${DIST}" == "groovy" ] || [ "${DIST}" == "hirsuit" ] || [ "${DIST}" == "buster" ]; then
+    ln -sfT distros/ubuntu2004 debian
+  elif [ "${DIST}" == "beowulf" ]; then
+    ln -sfT distros/beowulf debian
   fi
 
   setdebchangelog
@@ -351,7 +381,7 @@ elif [ "${OS}" == "debian" ] || [ "${OS}" == "ubuntu" ] || [ "${OS}" == "raspbia
   execpackpack
 
   # Try to install and run the newly built zoneminder package
-  if [ "${OS}" == "ubuntu" ] && [ "${DIST}" == "xenial" ] && [ "${ARCH}" == "x86_64" ] && [ "${TRAVIS}" == "true" ]; then
+  if [ "${OS}" == "ubuntu" ] && [ "${DIST}" == "bionic" ] && [ "${ARCH}" == "x86_64" ] && [ "${TRAVIS}" == "true" ]; then
       echo "Begin Deb package installation..."
       install_deb
   fi

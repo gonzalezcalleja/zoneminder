@@ -14,8 +14,8 @@ class Event extends ZM_Object {
     'StorageId' => null,
     'SecondaryStorageId' => null,
     'Cause' => '',
-    'StartTime' => null,
-    'EndTime' => null,
+    'StartDateTime' => null,
+    'EndDateTime' => null,
     'Width' => null,
     'Height' => null,
     'Length' => null,
@@ -50,6 +50,9 @@ class Event extends ZM_Object {
   public static function clear_cache() {
     return ZM_Object::_clear_cache(get_class());
   }
+  public function remove_from_cache() {
+    return ZM_Object::_remove_from_cache(get_class(), $this);
+  }
 
   public function Storage( $new = null ) {
     if ( $new ) {
@@ -58,8 +61,10 @@ class Event extends ZM_Object {
     if ( ! ( property_exists($this, 'Storage') and $this->{'Storage'} ) ) {
       if ( isset($this->{'StorageId'}) and $this->{'StorageId'} )
         $this->{'Storage'} = Storage::find_one(array('Id'=>$this->{'StorageId'}));
-      if ( ! ( property_exists($this, 'Storage') and $this->{'Storage'} ) )
+      if ( ! ( property_exists($this, 'Storage') and $this->{'Storage'} ) ) {
         $this->{'Storage'} = new Storage(NULL);
+        $this->{'Storage'}->Scheme($this->Scheme());
+      }
     }
     return $this->{'Storage'};
   }
@@ -88,7 +93,7 @@ class Event extends ZM_Object {
 
   public function Time() {
     if ( ! isset($this->{'Time'}) ) {
-      $this->{'Time'} = strtotime($this->{'StartTime'});
+      $this->{'Time'} = strtotime($this->{'StartDateTime'});
     }
     return $this->{'Time'};
   }
@@ -130,6 +135,10 @@ class Event extends ZM_Object {
       Error('Event delete on event with empty Id');
       return;
     }
+    if ( $this->{'Archived'} ) {
+      Error('Cannot delete an Archived event.');
+      return;
+    }
     if ( ZM_OPT_FAST_DELETE ) {
       dbQuery('DELETE FROM Events WHERE Id = ?', array($this->{'Id'}));
       return;
@@ -144,9 +153,9 @@ class Event extends ZM_Object {
       if ( $this->{'Scheme'} == 'Deep' ) {
 
         # Assumption: All events have a start time
-        $start_date = date_parse($this->{'StartTime'});
+        $start_date = date_parse($this->{'StartDateTime'});
         if ( ! $start_date ) {
-          throw new Exception('Unable to parse start time for event ' . $this->{'Id'} . ' not deleting files.');
+          throw new Exception('Unable to parse start date time for event ' . $this->{'Id'} . ' not deleting files.');
         }
         $start_date['year'] = $start_date['year'] % 100;
 
@@ -262,13 +271,18 @@ class Event extends ZM_Object {
     return $streamSrc;
   } // end function getStreamSrc
 
+  # The new='' is to so that if we pass null, we reset the value of DiskSpace.
+  # '' is not a valid DiskSpace so that tells us that nothing was passed whereas null (unknown) is.
   function DiskSpace( $new='' ) {
     if ( is_null($new) or ( $new != '' ) ) {
       $this->{'DiskSpace'} = $new;
     }
     if ( (!property_exists($this, 'DiskSpace')) or (null === $this->{'DiskSpace'}) ) {
       $this->{'DiskSpace'} = folder_size($this->Path());
-      dbQuery('UPDATE Events SET DiskSpace=? WHERE Id=?', array($this->{'DiskSpace'}, $this->{'Id'}));
+      if ( $this->{'EndDateTime'} ) {
+        # Finished events shouldn't grow in size much so we can commit it to the db.
+        dbQuery('UPDATE Events SET DiskSpace=? WHERE Id=?', array($this->{'DiskSpace'}, $this->{'Id'}));
+      }
     }
     return $this->{'DiskSpace'};
   }
@@ -277,7 +291,7 @@ class Event extends ZM_Object {
 	# The idea here is that we don't really want to use the analysis jpeg as the thumbnail.  
 	# The snapshot image will be generated during capturing
     if ( file_exists($this->Path().'/snapshot.jpg') ) {
-      Logger::Debug("snapshot exists");
+      Debug("snapshot exists");
       $frame = null;
     } else {
       # Load the frame with the highest score to use as a thumbnail
@@ -380,75 +394,71 @@ class Event extends ZM_Object {
     $Event = $this;
     $eventPath = $Event->Path();
 
-    if ( $frame and ! is_array($frame) ) {
+    if ( $frame and !is_array($frame) ) {
       # Must be an Id
-      Logger::Debug("Assuming that $frame is an Id");
-      $frame = array( 'FrameId'=>$frame, 'Type'=>'', 'Delta'=>0 );
+      Debug("Assuming that $frame is an Id");
+      $frame = array('FrameId'=>$frame, 'Type'=>'', 'Delta'=>0);
     }
 
-    if ( ( ! $frame ) and file_exists($eventPath.'/snapshot.jpg') ) {
+    if ( ( !$frame ) and file_exists($eventPath.'/snapshot.jpg') ) {
       # No frame specified, so look for a snapshot to use
       $captImage = 'snapshot.jpg';
-      Logger::Debug("Frame not specified, using snapshot");
-      $frame = array('FrameId'=>'snapshot', 'Type'=>'','Delta'=>0);
+      Debug('Frame not specified, using snapshot');
+      $frame = array('FrameId'=>'snapshot', 'Type'=>'', 'Delta'=>0);
     } else {
-      $captImage = sprintf( '%0'.ZM_EVENT_IMAGE_DIGITS.'d-analyze.jpg', $frame['FrameId'] );
+      $captImage = sprintf('%0'.ZM_EVENT_IMAGE_DIGITS.'d-analyze.jpg', $frame['FrameId']);
       if ( ! file_exists( $eventPath.'/'.$captImage ) ) {
-        $captImage = sprintf( '%0'.ZM_EVENT_IMAGE_DIGITS.'d-capture.jpg', $frame['FrameId'] );
-        if ( ! file_exists( $eventPath.'/'.$captImage ) ) {
+        $captImage = sprintf('%0'.ZM_EVENT_IMAGE_DIGITS.'d-capture.jpg', $frame['FrameId']);
+        if ( !file_exists($eventPath.'/'.$captImage) ) {
           # Generate the frame JPG
           if ( $Event->DefaultVideo() ) {
             $videoPath = $eventPath.'/'.$Event->DefaultVideo();
 
-            if ( ! file_exists( $videoPath ) ) {
-              Error("Event claims to have a video file, but it does not seem to exist at $videoPath" );
+            if ( !file_exists($videoPath) ) {
+              Error('Event claims to have a video file, but it does not seem to exist at '.$videoPath);
               return '';
             } 
               
             #$command ='ffmpeg -v 0 -i '.$videoPath.' -vf "select=gte(n\\,'.$frame['FrameId'].'),setpts=PTS-STARTPTS" '.$eventPath.'/'.$captImage;
             $command ='ffmpeg -ss '. $frame['Delta'] .' -i '.$videoPath.' -frames:v 1 '.$eventPath.'/'.$captImage;
-            Logger::Debug( "Running $command" );
+            Debug('Running '.$command);
             $output = array();
             $retval = 0;
-            exec( $command, $output, $retval );
-            Logger::Debug("Retval: $retval, output: " . implode("\n", $output));
+            exec($command, $output, $retval);
+            Debug("Retval: $retval, output: " . implode("\n", $output));
           } else {
-            Error("Can't create frame images from video because there is no video file for event ".$Event->Id().' at ' .$Event->Path() );
+            Error('Can\'t create frame images from video because there is no video file for event '.$Event->Id().' at ' .$Event->Path());
           }
         } // end if capture file exists
       } // end if analyze file exists
-    }
+    } // end if frame or snapshot
 
     $captPath = $eventPath.'/'.$captImage;
-    if ( ! file_exists($captPath) ) {
-      Error("Capture file does not exist at $captPath");
+    if ( !file_exists($captPath) ) {
+      Error('Capture file does not exist at '.$captPath);
     }
     
-    //echo "CI:$captImage, CP:$captPath, TCP:$captPath<br>";
-
     $analImage = sprintf('%0'.ZM_EVENT_IMAGE_DIGITS.'d-analyse.jpg', $frame['FrameId']);
     $analPath = $eventPath.'/'.$analImage;
 
-    //echo "AI:$analImage, AP:$analPath, TAP:$analPath<br>";
-
-    $alarmFrame = $frame['Type']=='Alarm';
+    $alarmFrame = $frame['Type'] == 'Alarm';
 
     $hasAnalImage = $alarmFrame && file_exists($analPath) && filesize($analPath);
     $isAnalImage = $hasAnalImage && !$captureOnly;
 
-    if ( !ZM_WEB_SCALE_THUMBS || $scale >= SCALE_BASE || !function_exists('imagecreatefromjpeg') ) {
+    if ( !ZM_WEB_SCALE_THUMBS || ($scale >= SCALE_BASE) || !function_exists('imagecreatefromjpeg') ) {
       $imagePath = $thumbPath = $isAnalImage ? $analPath : $captPath;
       $imageFile = $imagePath;
       $thumbFile = $thumbPath;
     } else {
-      if ( version_compare( phpversion(), '4.3.10', '>=') )
+      if ( version_compare(phpversion(), '4.3.10', '>=') )
         $fraction = sprintf('%.3F', $scale/SCALE_BASE);
       else
         $fraction = sprintf('%.3f', $scale/SCALE_BASE);
       $scale = (int)round($scale);
 
-      $thumbCaptPath = preg_replace( '/\.jpg$/', "-$scale.jpg", $captPath );
-      $thumbAnalPath = preg_replace( '/\.jpg$/', "-$scale.jpg", $analPath );
+      $thumbCaptPath = preg_replace('/\.jpg$/', "-$scale.jpg", $captPath);
+      $thumbAnalPath = preg_replace('/\.jpg$/', "-$scale.jpg", $analPath);
 
       if ( $isAnalImage ) {
         $imagePath = $analPath;
@@ -459,19 +469,19 @@ class Event extends ZM_Object {
       }
 
       $thumbFile = $thumbPath;
-      if ( $overwrite || ! file_exists( $thumbFile ) || ! filesize( $thumbFile ) ) {
+      if ( $overwrite || ! file_exists($thumbFile) || ! filesize($thumbFile) ) {
         // Get new dimensions
-        list( $imageWidth, $imageHeight ) = getimagesize( $imagePath );
+        list($imageWidth, $imageHeight) = getimagesize($imagePath);
         $thumbWidth = $imageWidth * $fraction;
         $thumbHeight = $imageHeight * $fraction;
 
         // Resample
-        $thumbImage = imagecreatetruecolor( $thumbWidth, $thumbHeight );
-        $image = imagecreatefromjpeg( $imagePath );
-        imagecopyresampled( $thumbImage, $image, 0, 0, 0, 0, $thumbWidth, $thumbHeight, $imageWidth, $imageHeight );
+        $thumbImage = imagecreatetruecolor($thumbWidth, $thumbHeight);
+        $image = imagecreatefromjpeg($imagePath);
+        imagecopyresampled($thumbImage, $image, 0, 0, 0, 0, $thumbWidth, $thumbHeight, $imageWidth, $imageHeight);
 
-        if ( !imagejpeg( $thumbImage, $thumbPath ) )
-          Error( "Can't create thumbnail '$thumbPath'" );
+        if ( !imagejpeg($thumbImage, $thumbPath) )
+          Error("Can't create thumbnail '$thumbPath'");
       }
     } # Create thumbnails
 
@@ -488,7 +498,7 @@ class Event extends ZM_Object {
         );
 
     return $imageData;
-  }
+  } # getImageSrc
 
   public function link_to($text=null) {
     if ( !$text )
@@ -511,14 +521,15 @@ class Event extends ZM_Object {
       if ( ZM_OPT_USE_AUTH ) {
         if ( ZM_AUTH_RELAY == 'hashed' ) {
           $url .= '?auth='.generateAuthHash( ZM_AUTH_HASH_IPS );
-        } elseif ( ZM_AUTH_RELAY == 'plain' ) {
-          $url = '?user='.$_SESSION['username'];
-          $url = '?pass='.$_SESSION['password'];
-        } elseif ( ZM_AUTH_RELAY == 'none' ) {
-          $url = '?user='.$_SESSION['username'];
+        } else if ( ZM_AUTH_RELAY == 'plain' ) {
+          $url .= '?user='.$_SESSION['username'];
+          $url .= '?pass='.$_SESSION['password'];
+        } else {
+          Error('Multi-Server requires AUTH_RELAY be either HASH or PLAIN');
+          return;
         }
       }
-      Logger::Debug("sending command to $url");
+      Debug("sending command to $url");
       // use key 'http' even if you send the request to https://...
       $options = array(
           'http' => array(
@@ -534,7 +545,7 @@ class Event extends ZM_Object {
           Error("Error restarting zmc using $url");
         }
         $event_data = json_decode($result,true);
-        Logger::Debug(print_r($event_data['event']['Event'],1));
+        Debug(print_r($event_data['event']['Event'],1));
         return $event_data['event']['Event']['fileExists'];
       } catch ( Exception $e ) {
         Error("Except $e thrown trying to get event data");
@@ -554,18 +565,19 @@ class Event extends ZM_Object {
     $Server = $Storage->ServerId() ? $Storage->Server() : $this->Monitor()->Server();
     if ( $Server->Id() != ZM_SERVER_ID ) {
 
-      $url = $Server->UrlToApi() . '/events/'.$this->{'Id'}.'.json';
+      $url = $Server->UrlToApi().'/events/'.$this->{'Id'}.'.json';
       if ( ZM_OPT_USE_AUTH ) {
         if ( ZM_AUTH_RELAY == 'hashed' ) {
-          $url .= '?auth='.generateAuthHash( ZM_AUTH_HASH_IPS );
+          $url .= '?auth='.generateAuthHash(ZM_AUTH_HASH_IPS);
         } elseif ( ZM_AUTH_RELAY == 'plain' ) {
-          $url = '?user='.$_SESSION['username'];
-          $url = '?pass='.$_SESSION['password'];
-        } elseif ( ZM_AUTH_RELAY == 'none' ) {
-          $url = '?user='.$_SESSION['username'];
+          $url .= '?user='.$_SESSION['username'];
+          $url .= '?pass='.$_SESSION['password'];
+        } else {
+          Error('Multi-Server requires AUTH_RELAY be either HASH or PLAIN');
+          return;
         }
       }
-      Logger::Debug("sending command to $url");
+      Debug("sending command to $url");
       // use key 'http' even if you send the request to https://...
       $options = array(
           'http' => array(
@@ -581,7 +593,7 @@ class Event extends ZM_Object {
           Error("Error restarting zmc using $url");
         }
         $event_data = json_decode($result,true);
-        Logger::Debug(print_r($event_data['event']['Event'], 1));
+        Debug(print_r($event_data['event']['Event'], 1));
         return $event_data['event']['Event']['fileSize'];
       } catch ( Exception $e ) {
         Error("Except $e thrown trying to get event data");
@@ -594,7 +606,7 @@ class Event extends ZM_Object {
     if ( $this->Archived() ) {
       return false;
     }
-    if ( !$this->EndTime() ) {
+    if ( !$this->EndDateTime() ) {
       return false;
     }
     if ( !canEdit('Events') ) {
@@ -607,7 +619,7 @@ class Event extends ZM_Object {
   public function cant_delete_reason() {
     if ( $this->Archived() ) {
       return 'You cannot delete an archived event. Unarchive it first.';
-    } else if ( ! $this->EndTime() ) {
+    } else if ( ! $this->EndDateTime() ) {
       return 'You cannot delete an event while it is being recorded. Wait for it to finish.';
     } else if ( ! canEdit('Events') ) {
       return 'You do not have rights to edit Events.';

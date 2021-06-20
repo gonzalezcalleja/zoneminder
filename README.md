@@ -22,12 +22,6 @@ https://github.com/ZoneMinder/zmdockerfiles
 
 ## Installation Methods
 
-### Building from Source is Discouraged
-
-Historically, installing ZoneMinder onto your system required building from source code by issuing the traditional configure, make, make install commands.  To get ZoneMinder to build, all of its dependencies had to be determined and installed beforehand. Init and logrotate scripts had to be manually copied into place following the build.  Optional packages such as jscalendar and Cambozola had to be manually installed. Uninstalls could leave stale files around, which could cause problems during an upgrade.  Speaking of upgrades, when it comes time to upgrade all these manual steps must be repeated again.
-
-Better methods exist today that do much of this for you. The current development team, along with other volunteers, have taken great strides in providing the resources necessary to avoid building from source.  
-
 ### Install from a Package Repository
 
 This is the recommended method to install ZoneMinder onto your system. ZoneMinder packages are maintained for the following distros:
@@ -39,9 +33,16 @@ This is the recommended method to install ZoneMinder onto your system. ZoneMinde
 - OpenSuse via [third party repository](http://www.zoneminder.com/wiki/index.php/Installing_using_ZoneMinder_RPMs_for_SuSE)
 - Mageia from their default repository
 - Arch via the [AUR](https://aur.archlinux.org/packages/zoneminder/)
-- Gentoo from their [default repository](https://packages.gentoo.org/packages/www-misc/zoneminder)
+- Gentoo via [Portage Overlays](http://gpo.zugaina.org/www-misc/zoneminder)
 
 If a repository that hosts ZoneMinder packages is not available for your distro, then you are encouraged to build your own package, rather than build from source.  While each distro is different in ways that set it apart from all the others, they are often similar enough to allow you to adapt another distro's package building instructions to your own.
+
+### Building from Source is Discouraged
+
+Historically, installing ZoneMinder onto your system required building from source code by issuing the traditional configure, make, make install commands.  To get ZoneMinder to build, all of its dependencies had to be determined and installed beforehand. Init and logrotate scripts had to be manually copied into place following the build.  Optional packages such as jscalendar and Cambozola had to be manually installed. Uninstalls could leave stale files around, which could cause problems during an upgrade.  Speaking of upgrades, when it comes time to upgrade all these manual steps must be repeated again.
+
+Better methods exist today that do much of this for you. The current development team, along with other volunteers, have taken great strides in providing the resources necessary to avoid building from source.  
+
 
 ### Building a ZoneMinder Package ###
 
@@ -69,18 +70,19 @@ Docker is a system to run applications inside isolated containers. ZoneMinder, a
 Dockerfile contained in this repository. However, there is still work needed to ensure that the main ZM features work 
 properly and are documented. 
 
-## Contribution Model and  Development
+## Contribution Model and Development
 
 * Source hosted at [GitHub](https://github.com/ZoneMinder/ZoneMinder/)
-* Report issues/questions/feature requests on [GitHub Issues](https://github.com/ZoneMinder/ZoneMinder/issues)
+* Report issues at [GitHub Issues](https://github.com/ZoneMinder/ZoneMinder/issues)
+* Questions/feature requests in [Slack](https://zoneminder-chat.slack.com/) or [forums](https://forums.zoneminder.com)
 
 Pull requests are very welcome!  If you would like to contribute, please follow
-the following steps.
+the following steps.  While step 3 is optional, it is preferred.
 
 1. Fork the repo
 2. Open an issue at our [GitHub Issues Tracker](https://github.com/ZoneMinder/ZoneMinder/issues).
-   Describe the bug that you've found, or the feature which you're asking for.
-   Jot down the issue number (e.g. 456)
+   Follow the issue template to describe the bug or security issue you found. Please note feature
+   requests or questions should be posted in our user forum or Slack channel.
 3. Create your feature branch (`git checkout -b 456-my-new-feature`)
 4. Commit your changes (`git commit -am 'Added some feature'`)
    It is preferred that you 'commit early and often' instead of bunching all

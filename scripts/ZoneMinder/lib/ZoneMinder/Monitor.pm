@@ -27,11 +27,15 @@ package ZoneMinder::Monitor;
 use 5.006;
 use strict;
 use warnings;
+use Time::HiRes qw(usleep);
 
 require ZoneMinder::Base;
 require ZoneMinder::Object;
 require ZoneMinder::Storage;
 require ZoneMinder::Server;
+require ZoneMinder::Memory;
+require ZoneMinder::Monitor_Status;
+require ZoneMinder::Zone;
 
 #our @ISA = qw(Exporter ZoneMinder::Base);
 use parent qw(ZoneMinder::Object);
@@ -114,6 +118,7 @@ $serial = $primary_key = 'Id';
   TrackDelay
   ReturnLocation
   ReturnDelay
+  ModectDuringPTZ
   DefaultRate
   DefaultScale
   SignalCheckPoints
@@ -121,6 +126,11 @@ $serial = $primary_key = 'Id';
   WebColour
   Exif
   Sequence
+  ZoneCount
+  Refresh
+  DefaultCodec
+  Latitude
+  Longitude
   );
 
 %defaults = (
@@ -194,6 +204,7 @@ $serial = $primary_key = 'Id';
     TrackDelay      =>  undef,
     ReturnLocation  =>  -1,
     ReturnDelay     =>  undef,
+    ModectDuringPTZ =>  0,
     DefaultRate =>  100,
     DefaultScale  =>  100,
     SignalCheckPoints =>  0,
@@ -201,6 +212,11 @@ $serial = $primary_key = 'Id';
     WebColour   =>  '#ff0000',
     Exif    =>  0,
     Sequence  =>  undef,
+    ZoneCount =>  0,
+    Refresh => undef,
+    DefaultCodec  => 'auto',
+    Latitude  =>  undef,
+    Longitude =>  undef,
     );
 
 sub Server {
@@ -210,6 +226,90 @@ sub Server {
 sub Storage {
 	return new ZoneMinder::Storage( $_[0]{StorageId} );
 } # end sub Storage
+
+sub Zones {
+  if (! exists $_[0]{Zones}) {
+    $_[0]{Zones} = [ $_[0]{Id} ? ZoneMinder::Zone->find(MonitorId=>$_[0]{Id}) : () ];
+  }
+  return wantarray ? @{$_[0]{Zones}} : $_[0]{Zones};
+}
+
+sub control {
+  my $monitor = shift;
+  my $command = shift;
+  my $process = shift;
+
+  if ( $command eq 'stop' or $command eq 'restart' ) {
+    if ( $process ) {
+      `/usr/bin/zmdc.pl stop $process -m $$monitor{Id}`;
+    } else {
+      `/usr/bin/zmdc.pl stop zma -m $$monitor{Id}`;
+      `/usr/bin/zmdc.pl stop zmc -m $$monitor{Id}`;
+    }
+  }
+  if ( $command eq 'start' or $command eq 'restart' ) {
+    if ( $process ) {
+      `/usr/bin/zmdc.pl start $process -m $$monitor{Id}`;
+    } else {
+      `/usr/bin/zmdc.pl start zmc -m $$monitor{Id}`;
+      `/usr/bin/zmdc.pl start zma -m $$monitor{Id}`;
+    } # end if
+  }
+} # end sub control
+
+sub Status {
+  my $self = shift;
+  $$self{Status} = shift if @_;
+  if ( ! $$self{Status} ) {
+    $$self{Status} = ZoneMinder::Monitor_Status->find_one(MonitorId=>$$self{Id});
+  }
+  return $$self{Status};
+}
+
+sub connect {
+  my $self = shift;
+  return ZoneMinder::Memory::zmMemVerify($self);
+}
+
+sub disconnect {
+  my $self = shift;
+  ZoneMinder::Memory::zmMemInvalidate($self); # Close our file handle to the zmc process we are about to end
+}
+
+sub suspendMotionDetection {
+  my $self = shift;
+  return 0 if ! ZoneMinder::Memory::zmMemVerify($self);
+  my $count = 50;
+  while ($count and ZoneMinder::Memory::zmMemRead($self, 'shared_data:active', 1)) {
+    ZoneMinder::Logger::Debug(1, 'Suspending motion detection');
+    ZoneMinder::Memory::zmMonitorSuspend($self);
+    usleep(100000);
+    $count -= 1;
+  }
+  if (!$count) {
+    ZoneMinder::Logger::Error('Unable to suspend motion detection after 5 seconds.');
+    ZoneMinder::Memory::zmMemInvalidate($self); # Close our file handle to the zmc process we are about to end
+  } else {
+    ZoneMinder::Logger::Debug(1, 'shared_data:active='.ZoneMinder::Memory::zmMemRead($self, 'shared_data:active', 1));
+  }
+}
+
+sub resumeMotionDetection {
+  my $self = shift;
+  return 0 if ! ZoneMinder::Memory::zmMemVerify($self);
+  my $count = 50;
+  while ($count and !ZoneMinder::Memory::zmMemRead($self, 'shared_data:active', 1)) {
+    ZoneMinder::Logger::Debug(1, 'Resuming motion detection');
+    ZoneMinder::Memory::zmMonitorResume($self);
+    usleep(100000);
+    $count -= 1;
+  }
+  if (!$count) {
+    ZoneMinder::Logger::Error('Unable to resume motion detection after 5 seconds.');
+    ZoneMinder::Memory::zmMemInvalidate($self); # Close our file handle to the zmc process we are about to end
+  }
+  return 1;
+}
 
 1;
 __END__

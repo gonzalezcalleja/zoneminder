@@ -20,9 +20,12 @@
 #include "zm_remote_camera.h"
 
 #include "zm_utils.h"
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/socket.h>
 
 RemoteCamera::RemoteCamera(
-  unsigned int p_monitor_id,
+  const Monitor *monitor,
   const std::string &p_protocol,
   const std::string &p_host,
   const std::string &p_port,
@@ -37,27 +40,27 @@ RemoteCamera::RemoteCamera(
   bool p_capture,
   bool p_record_audio
  ) :
-    Camera( p_monitor_id, REMOTE_SRC, p_width, p_height, p_colours, ZM_SUBPIX_ORDER_DEFAULT_FOR_COLOUR(p_colours), p_brightness, p_contrast, p_hue, p_colour, p_capture, p_record_audio ),
+    Camera( monitor, REMOTE_SRC, p_width, p_height, p_colours, ZM_SUBPIX_ORDER_DEFAULT_FOR_COLOUR(p_colours), p_brightness, p_contrast, p_hue, p_colour, p_capture, p_record_audio ),
     protocol( p_protocol ),
     host( p_host ),
     port( p_port ),
     path( p_path ),
     hp( 0 ),
     mNeedAuth(false),
-    mAuthenticator(NULL)
+    mAuthenticator(nullptr)
 {
     if ( path[0] != '/' )
         path = '/'+path;
 }
 
 RemoteCamera::~RemoteCamera() {
-  if ( hp != NULL ) {
+  if ( hp != nullptr ) {
     freeaddrinfo(hp);
-    hp = NULL;
+    hp = nullptr;
   }
 	if ( mAuthenticator ) {
 		delete mAuthenticator;
-		mAuthenticator = NULL;
+		mAuthenticator = nullptr;
 	}
 }
 
@@ -80,7 +83,7 @@ void RemoteCamera::Initialise() {
   if ( authIndex != std::string::npos ) {
     auth = host.substr( 0, authIndex );
     host.erase( 0, authIndex+1 );
-    auth64 = base64Encode( auth );
+    auth64 = Base64Encode(auth);
 
     authIndex = auth.rfind( ':' );
     username = auth.substr(0,authIndex);
@@ -99,9 +102,9 @@ void RemoteCamera::Initialise() {
   if ( ret != 0 ) {
     Fatal( "Can't getaddrinfo(%s port %s): %s", host.c_str(), port.c_str(), gai_strerror(ret) );
   }
-  struct addrinfo *p = NULL;
+  struct addrinfo *p = nullptr;
   int addr_count = 0;
-  for ( p = hp; p != NULL; p = p->ai_next ) {
+  for ( p = hp; p != nullptr; p = p->ai_next ) {
     addr_count++;
   }
   Debug(1, "%d addresses returned", addr_count);
