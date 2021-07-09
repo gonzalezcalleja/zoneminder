@@ -880,7 +880,7 @@ std::shared_ptr<Monitor> Monitor::Load(unsigned int p_id, bool load_zones, Purpo
   std::string sql = load_monitor_sql + stringtf(" WHERE Id=%d", p_id);
 
   zmDbRow dbrow;
-  if ( !dbrow.fetch(sql.c_str()) ) {
+  if (!dbrow.fetch(sql)) {
     Error("Can't use query result: %s", mysql_error(&dbconn));
     return nullptr;
   }
@@ -1184,8 +1184,7 @@ int Monitor::GetImage(int32_t index, int scale) {
     image = image_buffer[index];
   }
 
-  static char filename[PATH_MAX];
-  snprintf(filename, sizeof(filename), "Monitor%u.jpg", id);
+  std::string filename = stringtf("Monitor%u.jpg", id);
   image->WriteJpeg(filename);
   return 1;
 }
@@ -1287,16 +1286,14 @@ void Monitor::actionReload() {
 void Monitor::actionEnable() {
   shared_data->action |= RELOAD;
 
-  char sql[ZM_SQL_SML_BUFSIZ];
-  snprintf(sql, sizeof(sql), "UPDATE `Monitors` SET `Enabled` = 1 WHERE `Id` = %u", id);
+  std::string sql = stringtf("UPDATE `Monitors` SET `Enabled` = 1 WHERE `Id` = %u", id);
   zmDbDo(sql);
 }
 
 void Monitor::actionDisable() {
   shared_data->action |= RELOAD;
 
-  char sql[ZM_SQL_SML_BUFSIZ];
-  snprintf(sql, sizeof(sql), "UPDATE `Monitors` SET `Enabled` = 0 WHERE `Id` = %u", id);
+  std::string sql = stringtf("UPDATE `Monitors` SET `Enabled` = 0 WHERE `Id` = %u", id);
   zmDbDo(sql);
 }
 
@@ -1454,7 +1451,7 @@ void Monitor::DumpZoneImage(const char *zone_string) {
     // Grab the most revent event image
     std::string sql = stringtf("SELECT MAX(`Id`) FROM `Events` WHERE `MonitorId`=%d AND `Frames` > 0", id);
     zmDbRow eventid_row;
-    if ( eventid_row.fetch(sql.c_str()) ) {
+    if (eventid_row.fetch(sql)) {
       uint64_t event_id = atoll(eventid_row[0]);
 
       Debug(3, "Got event %" PRIu64, event_id);
@@ -1508,20 +1505,20 @@ void Monitor::DumpZoneImage(const char *zone_string) {
     zone_image->Outline(extra_colour, extra_zone);
   }
 
-  static char filename[PATH_MAX];
-  snprintf(filename, sizeof(filename), "Zones%u.jpg", id);
+  std::string filename = stringtf("Zones%u.jpg", id);
   zone_image->WriteJpeg(filename);
   delete zone_image;
 } // end void Monitor::DumpZoneImage(const char *zone_string)
 
 void Monitor::DumpImage(Image *dump_image) const {
-  if ( image_count && !(image_count%10) ) {
-    static char filename[PATH_MAX];
-    static char new_filename[PATH_MAX];
-    snprintf(filename, sizeof(filename), "Monitor%u.jpg", id);
-    snprintf(new_filename, sizeof(new_filename), "Monitor%u-new.jpg", id);
-    if ( dump_image->WriteJpeg(new_filename) )
-      rename(new_filename, filename);
+  if (image_count && !(image_count % 10)) {
+
+    std::string filename = stringtf("Monitor%u.jpg", id);
+    std::string new_filename = stringtf("Monitor%u-new.jpg", id);
+
+    if (dump_image->WriteJpeg(new_filename)) {
+      rename(new_filename.c_str(), filename.c_str());
+    }
   }
 } // end void Monitor::DumpImage(Image *dump_image)
 
@@ -2285,7 +2282,7 @@ void Monitor::Reload() {
   }
 
   std::string sql = load_monitor_sql + stringtf(" WHERE Id=%d", id);
-  zmDbRow *row = zmDbFetchOne(sql.c_str());
+  zmDbRow *row = zmDbFetchOne(sql);
   if (!row) {
     Error("Can't run query: %s", mysql_error(&dbconn));
   } else if (MYSQL_ROW dbrow = row->mysql_row()) {
@@ -2371,7 +2368,7 @@ void Monitor::ReloadLinkedMonitors(const char *p_linked_monitors) {
             "   AND `Enabled`=1",
             link_ids[i]);
 
-        MYSQL_RES *result = zmDbFetch(sql.c_str());
+        MYSQL_RES *result = zmDbFetch(sql);
         if (!result) {
           continue;
         }
@@ -2395,7 +2392,7 @@ std::vector<std::shared_ptr<Monitor>> Monitor::LoadMonitors(const std::string &w
   std::string sql = load_monitor_sql + " WHERE " + where;
   Debug(1, "Loading Monitors with %s", sql.c_str());
 
-  MYSQL_RES *result = zmDbFetch(sql.c_str());
+  MYSQL_RES *result = zmDbFetch(sql);
   if (!result) {
     Error("Can't load local monitors: %s", mysql_error(&dbconn));
     return {};
@@ -2785,8 +2782,8 @@ unsigned int Monitor::DetectMotion(const Image &comp_image, Event::StringSet &zo
   ref_image.Delta(comp_image, &delta_image);
 
   if (config.record_diag_images) {
-    ref_image.WriteJpeg(diag_path_ref.c_str(), config.record_diag_images_fifo);
-    delta_image.WriteJpeg(diag_path_delta.c_str(), config.record_diag_images_fifo);
+    ref_image.WriteJpeg(diag_path_ref, config.record_diag_images_fifo);
+    delta_image.WriteJpeg(diag_path_delta, config.record_diag_images_fifo);
   }
 
   // Blank out all exclusion zones
@@ -2934,7 +2931,7 @@ bool Monitor::DumpSettings(char *output, bool verbose) {
     sprintf( output+strlen(output), "Path : %s\n", cam->Path().c_str() );
   } else if ( camera->IsFile() ) {
     FileCamera* cam = static_cast<FileCamera*>(camera.get());
-    sprintf( output+strlen(output), "Path : %s\n", cam->Path() );
+    sprintf( output+strlen(output), "Path : %s\n", cam->Path().c_str() );
   }
   else if ( camera->IsFfmpeg() ) {
     FfmpegCamera* cam = static_cast<FfmpegCamera*>(camera.get());
@@ -3141,7 +3138,7 @@ std::vector<Group *> Monitor::Groups() {
     std::string sql = stringtf(
         "SELECT `Id`, `ParentId`, `Name` FROM `Groups` WHERE `Groups.Id` IN "
         "(SELECT `GroupId` FROM `Groups_Monitors` WHERE `MonitorId`=%d)", id);
-    MYSQL_RES *result = zmDbFetch(sql.c_str());
+    MYSQL_RES *result = zmDbFetch(sql);
     if (!result) {
       Error("Can't load groups: %s", mysql_error(&dbconn));
       return groups;
